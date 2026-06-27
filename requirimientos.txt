@@ -1,0 +1,9 @@
+streamlit
+psycopg2-binary
+pandas
+plotly
+xlsxwriter
+twilio
+opencv-python-headless
+pytesseract
+pillow
