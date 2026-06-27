@@ -1,6 +1,6 @@
 # ==========================================
-# inventory_system.py
-# Sistema de Inventario y Ventas
+# ventasNeira.py
+# Sistema de Inventario y Ventas - Neira Store
 # ==========================================
 
 import streamlit as st
@@ -78,7 +78,7 @@ def inicializar_tablas():
     # 5. Tabla de Configuración
     cur.execute('''CREATE TABLE IF NOT EXISTS configuracion (
         id SERIAL PRIMARY KEY, 
-        nombre_negocio TEXT DEFAULT 'Mi Negocio',
+        nombre_negocio TEXT DEFAULT 'Neira Store',
         direccion TEXT,
         telefono TEXT,
         email TEXT,
@@ -101,14 +101,14 @@ def inicializar_tablas():
     cur.execute("INSERT INTO usuarios (nombre, usuario, clave, rol) VALUES ('Vendedor', 'vendedor', 'vende2026', 'vendedor') ON CONFLICT DO NOTHING")
     
     # Insertar configuración inicial
-    cur.execute("INSERT INTO configuracion (nombre_negocio, moneda) VALUES ('Mi Tienda', '€') ON CONFLICT (id) DO NOTHING")
+    cur.execute("INSERT INTO configuracion (id, nombre_negocio, moneda) VALUES (1, 'Neira Store', '€') ON CONFLICT (id) DO NOTHING")
     
     # Insertar categorías base
     categorias_base = ["Electrónica", "Ropa", "Alimentos", "Hogar", "Juguetes", "Herramientas", "Libros", "Deportes"]
     for cat in categorias_base:
         cur.execute("INSERT INTO categorias (nombre) VALUES (%s) ON CONFLICT DO NOTHING", (cat,))
     
-    # Añadir columna de stock mínimo si no existe
+    # Añadir columnas adicionales si no existen
     try:
         cur.execute("ALTER TABLE productos ADD COLUMN stock_minimo INTEGER DEFAULT 5")
     except Exception:
@@ -124,7 +124,6 @@ def inicializar_tablas():
     except Exception:
         pass
     
-    # Añadir columna de cliente y vendedor a ventas
     try:
         cur.execute("ALTER TABLE ventas ADD COLUMN cliente TEXT")
     except Exception:
@@ -141,7 +140,7 @@ def inicializar_tablas():
     conn.close()
 
 # --- CONFIGURACIÓN DE LA INTERFAZ ---
-st.set_page_config(page_title="Jacobo Store - Inventario", layout="wide", page_icon="📦")
+st.set_page_config(page_title="Neira Store - Inventario", layout="wide", page_icon="🏪")
 
 # --- SISTEMA ANTI-ATASCOS ---
 if 'db_ready' not in st.session_state:
@@ -176,7 +175,6 @@ if not st.session_state['logged_in']:
                 conn.close()
                 st.rerun()
             else:
-                # Intentar con hash (si se usa)
                 cur.execute("SELECT rol FROM usuarios WHERE usuario=%s AND clave=%s", 
                            (u, hashlib.sha256(p.encode()).hexdigest()))
                 res_cifrado = cur.fetchone()
@@ -191,7 +189,7 @@ if not st.session_state['logged_in']:
         except Exception as e:
             st.sidebar.error(f"Error de conexión: {e}")
     
-    st.title("📦 Sistema de Inventario y Ventas")
+    st.title("🏪 Sistema de Inventario y Ventas - Neira Store")
     st.info("👋 Bienvenido. Ingrese sus credenciales en la barra lateral.")
     
     col1, col2, col3 = st.columns(3)
@@ -205,7 +203,7 @@ if not st.session_state['logged_in']:
     st.stop()
 
 # --- MENÚ Y BOTÓN DE CERRAR ---
-st.sidebar.title("📦 Panel de Control")
+st.sidebar.title("🏪 Panel de Control")
 
 # Obtener nombre del negocio
 try:
@@ -213,10 +211,10 @@ try:
     cur = conn.cursor()
     cur.execute("SELECT nombre_negocio FROM configuracion WHERE id = 1")
     nombre_neg = cur.fetchone()
-    negocio_nombre = nombre_neg[0] if nombre_neg else "Mi Tienda"
+    negocio_nombre = nombre_neg[0] if nombre_neg else "Neira Store"
     conn.close()
 except:
-    negocio_nombre = "Mi Tienda"
+    negocio_nombre = "Neira Store"
 
 st.sidebar.markdown(f"### 🏪 {negocio_nombre}")
 
@@ -247,33 +245,22 @@ if menu == "🏠 Inicio":
     st.subheader("📊 Dashboard General")
     conn = conectar_db()
     
-    # Obtener métricas
     total_productos = pd.read_sql("SELECT COUNT(*) FROM productos", conn).iloc[0,0]
     stock_total = pd.read_sql("SELECT SUM(stock_actual) FROM productos", conn).iloc[0,0] or 0
-    
-    # Ventas totales
     ventas_total = pd.read_sql("SELECT SUM(total_venta) FROM ventas", conn).iloc[0,0] or 0
     
-    # Ventas del día
     hoy = datetime.now().date()
     ventas_hoy = pd.read_sql("SELECT SUM(total_venta) FROM ventas WHERE fecha = %s", conn, params=(hoy,)).iloc[0,0] or 0
-    
-    # Productos con stock bajo
     stock_bajo = pd.read_sql("SELECT COUNT(*) FROM productos WHERE stock_actual <= stock_minimo", conn).iloc[0,0] or 0
-    
-    # Ganancia total (ventas - costos)
-    costo_total_ventas = pd.read_sql("SELECT SUM(cantidad * precio_unitario) FROM ventas", conn).iloc[0,0] or 0
-    # Nota: Para calcular ganancia exacta necesitarías el costo de compra de cada producto vendido
     
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("📦 Total Productos", total_productos)
     c2.metric("💰 Ventas Totales", f"{ventas_total:,.2f} €")
-    c3.metric("📈 Ventas Hoy", f"{ventas_hoy:,.2f} €", delta=f"{ventas_hoy/total_productos:.2f}€/prod" if total_productos > 0 else None)
+    c3.metric("📈 Ventas Hoy", f"{ventas_hoy:,.2f} €")
     c4.metric("⚠️ Stock Bajo", stock_bajo, delta="Revisar" if stock_bajo > 0 else "OK")
     
     st.markdown("---")
     
-    # Gráficos
     col1, col2 = st.columns(2)
     
     with col1:
@@ -305,7 +292,6 @@ if menu == "🏠 Inicio":
         else:
             st.info("No hay datos de ventas aún.")
     
-    # Lista de productos con stock bajo
     if stock_bajo > 0:
         st.markdown("---")
         st.warning(f"⚠️ {stock_bajo} producto(s) con stock bajo:")
@@ -326,12 +312,10 @@ elif menu == "📦 Productos":
     tabs = st.tabs(["➕ Nuevo Producto", "✏️ Editar Producto", "🔍 Ver Productos"])
     
     conn = conectar_db()
-    
-    # Obtener categorías para selects
     categorias_df = pd.read_sql("SELECT nombre FROM categorias ORDER BY nombre", conn)
     categorias_lista = categorias_df['nombre'].tolist() if not categorias_df.empty else []
     
-    with tabs[0]:  # ➕ Nuevo Producto
+    with tabs[0]:
         with st.form("form_nuevo_producto"):
             st.subheader("Registrar Nuevo Producto")
             c1, c2 = st.columns(2)
@@ -358,7 +342,6 @@ elif menu == "📦 Productos":
             st.caption("* Campos obligatorios")
             
             if st.form_submit_button("💾 Guardar Producto", type="primary"):
-                # Validaciones
                 if not codigo.strip():
                     st.error("⚠️ El código del producto es obligatorio.")
                 elif not nombre.strip():
@@ -377,7 +360,6 @@ elif menu == "📦 Productos":
                               precio_compra, precio_venta, stock_inicial, 
                               stock_minimo, proveedor, ubicacion))
                         
-                        # Si se creó una nueva categoría, agregarla a la tabla
                         if categoria == "Nueva..." and categoria_nueva.strip():
                             try:
                                 cur.execute("INSERT INTO categorias (nombre) VALUES (%s) ON CONFLICT DO NOTHING", 
@@ -397,7 +379,7 @@ elif menu == "📦 Productos":
                         else:
                             st.error(f"⚠️ Error: {e}")
     
-    with tabs[1]:  # ✏️ Editar Producto
+    with tabs[1]:
         productos_df = pd.read_sql("SELECT id, codigo, nombre FROM productos ORDER BY nombre", conn)
         
         if not productos_df.empty:
@@ -469,17 +451,15 @@ elif menu == "📦 Productos":
         else:
             st.info("No hay productos registrados para editar.")
     
-    with tabs[2]:  # 🔍 Ver Productos
+    with tabs[2]:
         st.subheader("📋 Inventario Actual")
         
-        # Filtros
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             categoria_filtro = st.selectbox("Filtrar por Categoría", ["Todas"] + categorias_lista)
         with col_f2:
             stock_filtro = st.selectbox("Filtrar por Stock", ["Todos", "Con Stock", "Sin Stock", "Stock Bajo"])
         
-        # Construir consulta
         query = "SELECT codigo, nombre, categoria, precio_compra, precio_venta, stock_actual, stock_minimo, proveedor FROM productos"
         condiciones = []
         params = []
@@ -505,7 +485,6 @@ elif menu == "📦 Productos":
         if not productos_mostrar.empty:
             st.dataframe(productos_mostrar, use_container_width=True)
             
-            # Resumen
             total_valor = (productos_mostrar['precio_compra'] * productos_mostrar['stock_actual']).sum()
             total_venta = (productos_mostrar['precio_venta'] * productos_mostrar['stock_actual']).sum()
             
@@ -513,7 +492,6 @@ elif menu == "📦 Productos":
             c1.metric("💰 Valor de Inventario (Costo)", f"{total_valor:,.2f} €")
             c2.metric("💰 Valor de Inventario (Venta)", f"{total_venta:,.2f} €")
             
-            # Botón para descargar
             csv_data = productos_mostrar.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
             st.download_button(
                 label="📥 Descargar Inventario", 
@@ -534,7 +512,7 @@ elif menu == "📥 Compras (Entradas)":
     
     conn = conectar_db()
     
-    with tabs[0]:  # ➕ Registrar Compra
+    with tabs[0]:
         st.subheader("Registrar Entrada de Mercancía (Compra)")
         
         productos_df = pd.read_sql("SELECT id, codigo, nombre, precio_compra FROM productos ORDER BY nombre", conn)
@@ -561,14 +539,12 @@ elif menu == "📥 Compras (Entradas)":
                 
                 observaciones = st.text_area("Observaciones")
                 
-                # Mostrar resumen
                 st.info(f"📦 Producto: {producto_sel} | Cantidad: {cantidad} | Costo Unitario: {costo_unitario:.2f}€ | Total: {total_compra:.2f}€")
                 
                 if st.form_submit_button("✅ Registrar Compra", type="primary"):
                     try:
                         cur = conn.cursor()
                         
-                        # Registrar compra
                         cur.execute("""
                             INSERT INTO compras 
                             (producto_id, cantidad, costo_unitario, total_compra, fecha, 
@@ -577,11 +553,10 @@ elif menu == "📥 Compras (Entradas)":
                         """, (producto_id, cantidad, costo_unitario, total_compra, 
                               fecha_compra, proveedor, factura_compra, observaciones))
                         
-                        # Actualizar stock del producto
                         cur.execute("""
                             UPDATE productos 
                             SET stock_actual = stock_actual + %s,
-                                precio_compra = %s  -- Actualizar precio de compra
+                                precio_compra = %s
                             WHERE id = %s
                         """, (cantidad, costo_unitario, producto_id))
                         
@@ -596,7 +571,7 @@ elif menu == "📥 Compras (Entradas)":
         else:
             st.warning("⚠️ No hay productos registrados. Registra productos primero.")
     
-    with tabs[1]:  # 📋 Historial de Compras
+    with tabs[1]:
         st.subheader("📋 Historial de Compras")
         
         compras_df = pd.read_sql("""
@@ -607,14 +582,12 @@ elif menu == "📥 Compras (Entradas)":
         """, conn)
         
         if not compras_df.empty:
-            # Filtros
             col_f1, col_f2 = st.columns(2)
             with col_f1:
                 fecha_ini = st.date_input("Desde", compras_df['fecha'].min() if not compras_df.empty else datetime.now().date())
             with col_f2:
                 fecha_fin = st.date_input("Hasta", compras_df['fecha'].max() if not compras_df.empty else datetime.now().date())
             
-            # Aplicar filtros
             compras_df['fecha'] = pd.to_datetime(compras_df['fecha']).dt.date
             compras_filtradas = compras_df[
                 (compras_df['fecha'] >= fecha_ini) & 
@@ -622,7 +595,6 @@ elif menu == "📥 Compras (Entradas)":
             ]
             
             if not compras_filtradas.empty:
-                # Mostrar resumen
                 total_invertido = compras_filtradas['total_compra'].sum()
                 total_unidades = compras_filtradas['cantidad'].sum()
                 
@@ -647,7 +619,7 @@ elif menu == "💳 Ventas (Salidas)":
     
     conn = conectar_db()
     
-    with tabs[0]:  # ➕ Registrar Venta
+    with tabs[0]:
         st.subheader("Registrar Salida de Mercancía (Venta)")
         
         productos_df = pd.read_sql("SELECT id, codigo, nombre, precio_venta, stock_actual FROM productos ORDER BY nombre", conn)
@@ -677,7 +649,6 @@ elif menu == "💳 Ventas (Salidas)":
                 
                 observaciones = st.text_area("Observaciones")
                 
-                # Mostrar resumen
                 if cantidad > stock_disponible:
                     st.error(f"⚠️ Stock insuficiente. Disponible: {stock_disponible} unidades.")
                 else:
@@ -691,7 +662,6 @@ elif menu == "💳 Ventas (Salidas)":
                         try:
                             cur = conn.cursor()
                             
-                            # Registrar venta
                             cur.execute("""
                                 INSERT INTO ventas 
                                 (producto_id, cantidad, precio_unitario, total_venta, fecha, 
@@ -700,7 +670,6 @@ elif menu == "💳 Ventas (Salidas)":
                             """, (producto_id, cantidad, precio_unitario, total_venta, 
                                   fecha_venta, metodo_pago, cliente, vendedor, factura, observaciones))
                             
-                            # Actualizar stock del producto
                             cur.execute("""
                                 UPDATE productos 
                                 SET stock_actual = stock_actual - %s
@@ -718,7 +687,7 @@ elif menu == "💳 Ventas (Salidas)":
         else:
             st.warning("⚠️ No hay productos registrados. Registra productos primero.")
     
-    with tabs[1]:  # 📋 Historial de Ventas
+    with tabs[1]:
         st.subheader("📋 Historial de Ventas")
         
         ventas_df = pd.read_sql("""
@@ -729,7 +698,6 @@ elif menu == "💳 Ventas (Salidas)":
         """, conn)
         
         if not ventas_df.empty:
-            # Filtros
             col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1:
                 fecha_ini = st.date_input("Desde", ventas_df['fecha'].min() if not ventas_df.empty else datetime.now().date())
@@ -738,7 +706,6 @@ elif menu == "💳 Ventas (Salidas)":
             with col_f3:
                 metodo_filtro = st.selectbox("Método de Pago", ["Todos"] + ventas_df['metodo_pago'].unique().tolist())
             
-            # Aplicar filtros
             ventas_df['fecha'] = pd.to_datetime(ventas_df['fecha']).dt.date
             ventas_filtradas = ventas_df[
                 (ventas_df['fecha'] >= fecha_ini) & 
@@ -749,7 +716,6 @@ elif menu == "💳 Ventas (Salidas)":
                 ventas_filtradas = ventas_filtradas[ventas_filtradas['metodo_pago'] == metodo_filtro]
             
             if not ventas_filtradas.empty:
-                # Mostrar resumen
                 total_ventas = ventas_filtradas['total_venta'].sum()
                 total_unidades = ventas_filtradas['cantidad'].sum()
                 
@@ -758,7 +724,6 @@ elif menu == "💳 Ventas (Salidas)":
                 c2.metric("📦 Total Unidades Vendidas", total_unidades)
                 c3.metric("📊 Promedio por Venta", f"{(total_ventas/len(ventas_filtradas)):.2f} €" if len(ventas_filtradas) > 0 else "0 €")
                 
-                # Gráfico de ventas por día
                 st.subheader("📈 Ventas Diarias")
                 ventas_diarias = ventas_filtradas.groupby('fecha')['total_venta'].sum().reset_index()
                 st.line_chart(data=ventas_diarias.set_index('fecha'))
@@ -766,7 +731,6 @@ elif menu == "💳 Ventas (Salidas)":
                 st.dataframe(ventas_filtradas[['fecha', 'codigo', 'nombre', 'cantidad', 'precio_unitario', 'total_venta', 'metodo_pago', 'cliente']], 
                            use_container_width=True)
                 
-                # Botón para descargar
                 csv_data = ventas_filtradas.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
                 st.download_button(
                     label="📥 Descargar Reporte de Ventas", 
@@ -789,7 +753,6 @@ elif menu == "📊 Balance General":
     
     conn = conectar_db()
     
-    # ====== 1. Resumen de Inventario ======
     st.markdown("### 📦 Resumen de Inventario")
     
     inventario_df = pd.read_sql("""
@@ -802,291 +765,4 @@ elif menu == "📊 Balance General":
     """, conn)
     
     if not inventario_df.empty:
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("📦 Total Productos", int(inventario_df['total_productos'].iloc[0]))
-        col2.metric("📦 Total Unidades", int(inventario_df['total_unidades'].iloc[0]))
-        col3.metric("💰 Valor (Costo)", f"{inventario_df['valor_inventario_costo'].iloc[0]:,.2f} €")
-        col4.metric("💰 Valor (Venta)", f"{inventario_df['valor_inventario_venta'].iloc[0]:,.2f} €")
-    
-    # ====== 2. Resumen de Ventas ======
-    st.markdown("### 💳 Resumen de Ventas")
-    
-    # Ventas totales
-    ventas_totales = pd.read_sql("""
-        SELECT 
-            COUNT(*) as total_ventas,
-            SUM(cantidad) as total_unidades_vendidas,
-            SUM(total_venta) as total_ingresos
-        FROM ventas
-    """, conn)
-    
-    # Ventas por período
-    hoy = datetime.now().date()
-    ventas_hoy = pd.read_sql("""
-        SELECT 
-            COUNT(*) as ventas_hoy,
-            SUM(cantidad) as unidades_hoy,
-            SUM(total_venta) as ingresos_hoy
-        FROM ventas
-        WHERE fecha = %s
-    """, conn, params=(hoy,))
-    
-    # Ventas del mes
-    inicio_mes = hoy.replace(day=1)
-    ventas_mes = pd.read_sql("""
-        SELECT 
-            COUNT(*) as ventas_mes,
-            SUM(cantidad) as unidades_mes,
-            SUM(total_venta) as ingresos_mes
-        FROM ventas
-        WHERE fecha >= %s
-    """, conn, params=(inicio_mes,))
-    
-    col1, col2, col3 = st.columns(3)
-    col1.metric("💰 Ingresos Totales", f"{ventas_totales['total_ingresos'].iloc[0]:,.2f} €" if not ventas_totales.empty else "0 €")
-    col2.metric("📈 Ventas Hoy", f"{ventas_hoy['ingresos_hoy'].iloc[0]:,.2f} €" if not ventas_hoy.empty else "0 €")
-    col3.metric("📆 Ventas del Mes", f"{ventas_mes['ingresos_mes'].iloc[0]:,.2f} €" if not ventas_mes.empty else "0 €")
-    
-    # ====== 3. Resumen de Compras ======
-    st.markdown("### 📥 Resumen de Compras")
-    
-    compras_totales = pd.read_sql("""
-        SELECT 
-            COUNT(*) as total_compras,
-            SUM(cantidad) as total_unidades_compradas,
-            SUM(total_compra) as total_invertido
-        FROM compras
-    """, conn)
-    
-    # Compras del mes
-    compras_mes = pd.read_sql("""
-        SELECT 
-            COUNT(*) as compras_mes,
-            SUM(cantidad) as unidades_mes,
-            SUM(total_compra) as invertido_mes
-        FROM compras
-        WHERE fecha >= %s
-    """, conn, params=(inicio_mes,))
-    
-    col1, col2, col3 = st.columns(3)
-    col1.metric("💰 Total Invertido", f"{compras_totales['total_invertido'].iloc[0]:,.2f} €" if not compras_totales.empty else "0 €")
-    col2.metric("📦 Unidades Compradas", int(compras_totales['total_unidades_compradas'].iloc[0]) if not compras_totales.empty else 0)
-    col3.metric("📆 Compras del Mes", f"{compras_mes['invertido_mes'].iloc[0]:,.2f} €" if not compras_mes.empty else "0 €")
-    
-    # ====== 4. Balance ======
-    st.markdown("---")
-    st.markdown("### 📊 Balance General")
-    
-    ingresos_totales = ventas_totales['total_ingresos'].iloc[0] if not ventas_totales.empty else 0
-    costo_inventario = inventario_df['valor_inventario_costo'].iloc[0] if not inventario_df.empty else 0
-    gastos_compras = compras_totales['total_invertido'].iloc[0] if not compras_totales.empty else 0
-    
-    # Beneficio = Ingresos - Costo de lo vendido
-    # Estimamos el costo de lo vendido = valor del inventario inicial - valor del inventario actual + compras
-    # Para simplificar: Beneficio = Ingresos - (Compras + Inventario Inicial - Inventario Actual)
-    # Suponemos que el inventario inicial se puede calcular como compras anteriores
-    
-    # Para este cálculo simple: Beneficio = Ingresos - (Compras - Variación de Inventario)
-    # Beneficio aproximado = Ingresos - Costo de lo vendido
-    
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("💰 Ingresos Totales", f"{ingresos_totales:,.2f} €")
-    col2.metric("🛒 Total Compras", f"{gastos_compras:,.2f} €")
-    col3.metric("📦 Valor Inventario", f"{costo_inventario:,.2f} €")
-    
-    # Beneficio aproximado (simplificado)
-    beneficio = ingresos_totales - gastos_compras
-    col4.metric("📈 Beneficio Estimado", f"{beneficio:,.2f} €", 
-                delta="Positivo" if beneficio > 0 else "Negativo")
-    
-    # ====== 5. Productos más vendidos ======
-    st.markdown("### 🏆 Productos Más Vendidos")
-    
-    top_productos = pd.read_sql("""
-        SELECT 
-            p.nombre, 
-            p.categoria,
-            SUM(v.cantidad) as total_vendido,
-            SUM(v.total_venta) as total_ingresos
-        FROM ventas v
-        JOIN productos p ON v.producto_id = p.id
-        GROUP BY p.nombre, p.categoria
-        ORDER BY total_ingresos DESC
-        LIMIT 10
-    """, conn)
-    
-    if not top_productos.empty:
-        st.dataframe(top_productos, use_container_width=True)
-        
-        # Gráfico
-        st.bar_chart(data=top_productos.set_index('nombre')['total_ingresos'])
-    else:
-        st.info("Aún no hay datos de ventas.")
-    
-    # ====== 6. Productos sin stock ======
-    st.markdown("### ⚠️ Productos sin Stock")
-    
-    sin_stock = pd.read_sql("""
-        SELECT codigo, nombre, categoria, stock_actual, stock_minimo
-        FROM productos
-        WHERE stock_actual <= 0
-        ORDER BY nombre
-    """, conn)
-    
-    if not sin_stock.empty:
-        st.warning(f"{len(sin_stock)} productos agotados")
-        st.dataframe(sin_stock, use_container_width=True)
-    else:
-        st.success("✅ Todos los productos tienen stock disponible.")
-    
-    conn.close()
-
-# ==========================================
-# 🏷️ CATEGORÍAS
-# ==========================================
-elif menu == "🏷️ Categorías" and st.session_state.u_rol == "admin":
-    st.subheader("Gestión de Categorías")
-    conn = conectar_db()
-    
-    tabs = st.tabs(["➕ Nueva Categoría", "✏️ Editar Categoría", "🔍 Ver Categorías"])
-    
-    with tabs[0]:
-        with st.form("form_nueva_categoria"):
-            nombre_cat = st.text_input("Nombre de la Categoría")
-            if st.form_submit_button("Guardar Categoría"):
-                if nombre_cat.strip():
-                    cur = conn.cursor()
-                    try:
-                        cur.execute("INSERT INTO categorias (nombre) VALUES (%s)", (nombre_cat.strip(),))
-                        conn.commit()
-                        st.success("✅ Categoría agregada")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        conn.rollback()
-                        st.error("⚠️ Esta categoría ya existe.")
-                else:
-                    st.warning("El nombre no puede estar vacío.")
-    
-    with tabs[1]:
-        categorias_df = pd.read_sql("SELECT id, nombre FROM categorias ORDER BY nombre", conn)
-        if not categorias_df.empty:
-            cat_sel = st.selectbox("Seleccionar categoría", categorias_df['nombre'])
-            cat_data = categorias_df[categorias_df['nombre'] == cat_sel].iloc[0]
-            
-            with st.form("form_editar_categoria"):
-                nuevo_nombre = st.text_input("Nuevo nombre", value=cat_data['nombre'])
-                if st.form_submit_button("Actualizar"):
-                    cur = conn.cursor()
-                    try:
-                        cur.execute("UPDATE categorias SET nombre = %s WHERE id = %s", 
-                                   (nuevo_nombre, int(cat_data['id'])))
-                        conn.commit()
-                        st.success("✅ Categoría actualizada")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        conn.rollback()
-                        st.error("⚠️ Error: Ya existe otra categoría con ese nombre.")
-        else:
-            st.info("No hay categorías registradas.")
-    
-    with tabs[2]:
-        categorias_ver = pd.read_sql("SELECT nombre FROM categorias ORDER BY nombre", conn)
-        st.dataframe(categorias_ver, use_container_width=True)
-    
-    conn.close()
-
-# ==========================================
-# 👥 USUARIOS
-# ==========================================
-elif menu == "👥 Usuarios" and st.session_state.u_rol == "admin":
-    st.subheader("👥 Gestión de Usuarios")
-    conn = conectar_db()
-    
-    with st.form("form_crear_usuario"):
-        st.markdown("### Crear Nuevo Usuario")
-        c1, c2 = st.columns(2)
-        with c1:
-            nombre = st.text_input("Nombre Completo")
-            usuario = st.text_input("Nombre de Usuario *")
-        with c2:
-            clave = st.text_input("Contraseña *", type="password")
-            rol = st.selectbox("Rol", ["vendedor", "admin"])
-        
-        st.caption("* Campos obligatorios")
-        
-        if st.form_submit_button("Crear Usuario"):
-            if not usuario.strip():
-                st.warning("El nombre de usuario es obligatorio.")
-            elif not clave.strip():
-                st.warning("La contraseña es obligatoria.")
-            else:
-                cur = conn.cursor()
-                try:
-                    cur.execute("INSERT INTO usuarios (nombre, usuario, clave, rol) VALUES (%s, %s, %s, %s)",
-                               (nombre, usuario, hashlib.sha256(clave.encode()).hexdigest(), rol))
-                    conn.commit()
-                    st.success("✅ Usuario creado exitosamente")
-                    time.sleep(1)
-                    st.rerun()
-                except Exception as e:
-                    conn.rollback()
-                    st.error("⚠️ Error: Este nombre de usuario ya existe.")
-    
-    # Lista de usuarios
-    st.markdown("### 📋 Usuarios Registrados")
-    usuarios_df = pd.read_sql("SELECT id, nombre, usuario, rol FROM usuarios", conn)
-    st.dataframe(usuarios_df, use_container_width=True)
-    
-    conn.close()
-
-# ==========================================
-# ⚙️ CONFIGURACIÓN
-# ==========================================
-elif menu == "⚙️ Configuración" and st.session_state.u_rol == "admin":
-    st.subheader("⚙️ Configuración del Sistema")
-    conn = conectar_db()
-    
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM configuracion WHERE id = 1")
-    config = cur.fetchone()
-    
-    with st.form("form_configuracion"):
-        st.markdown("### Datos del Negocio")
-        nombre_neg = st.text_input("Nombre del Negocio", value=config[1] if config else "Mi Negocio")
-        direccion = st.text_input("Dirección", value=config[2] if config and len(config) > 2 else "")
-        telefono = st.text_input("Teléfono", value=config[3] if config and len(config) > 3 else "")
-        email = st.text_input("Email", value=config[4] if config and len(config) > 4 else "")
-        moneda = st.text_input("Símbolo de Moneda", value=config[5] if config and len(config) > 5 else "€")
-        iva = st.number_input("IVA (%)", min_value=0.0, max_value=100.0, value=float(config[6]) if config and len(config) > 6 else 0.0)
-        
-        if st.form_submit_button("💾 Guardar Configuración"):
-            try:
-                cur.execute("""
-                    INSERT INTO configuracion (id, nombre_negocio, direccion, telefono, email, moneda, iva)
-                    VALUES (1, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO UPDATE SET
-                        nombre_negocio = EXCLUDED.nombre_negocio,
-                        direccion = EXCLUDED.direccion,
-                        telefono = EXCLUDED.telefono,
-                        email = EXCLUDED.email,
-                        moneda = EXCLUDED.moneda,
-                        iva = EXCLUDED.iva
-                """, (nombre_neg, direccion, telefono, email, moneda, iva))
-                conn.commit()
-                st.success("✅ Configuración guardada")
-                time.sleep(1)
-                st.rerun()
-            except Exception as e:
-                conn.rollback()
-                st.error(f"⚠️ Error: {e}")
-    
-    conn.close()
-
-# ==========================================
-# EJECUCIÓN
-# ==========================================
-if __name__ == "__main__":
-    st.markdown("---")
-    st.caption("📦 Sistema de Inventario y Ventas v1.0")
+        col1,
