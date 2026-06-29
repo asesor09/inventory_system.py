@@ -12,7 +12,7 @@ import time
 import io
 
 # --- CONFIGURACIÓN GLOBAL ---
-st.set_page_config(page_title="Jacobo Store - Inventario", layout="wide", page_icon="📦")
+st.set_page_config(page_title="Neira Store - Inventario", layout="wide", page_icon="📦")
 DB_URL = st.secrets["DB_URL"]
 
 # --- CONTROL ESTRICTO DE VENTANAS DUPLICADAS ---
