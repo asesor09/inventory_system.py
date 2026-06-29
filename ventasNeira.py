@@ -11,7 +11,7 @@ import hashlib
 import time
 
 # --- CONFIGURACIÓN DE CONEXIÓN GLOBAL (NEON) ---
-DB_URL = st.secrets["DB_URL"]
+def conectar_db():
 
 def conectar_db():
     return psycopg2.connect(DB_URL)
