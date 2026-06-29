@@ -262,8 +262,8 @@ if menu == "🏠 Inicio":
     
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("📦 Total Productos", total_productos)
-    c2.metric("💰 Ventas Totales", f"{ventas_total:,.2f} €")
-    c3.metric("📈 Ventas Hoy", f"{ventas_hoy:,.2f} €")
+    c2.metric("💰 Ventas Totales", f"{ventas_total:,.2f} $")
+    c3.metric("📈 Ventas Hoy", f"{ventas_hoy:,.2f} $")
     c4.metric("⚠️ Stock Bajo", stock_bajo, delta="Revisar" if stock_bajo > 0 else "OK")
     
     st.markdown("---")
@@ -338,8 +338,8 @@ elif menu == "📦 Productos":
                     categoria_final = categoria
             
             with c2:
-                precio_compra = st.number_input("Precio de Compra (€)", min_value=0.0, step=0.01)
-                precio_venta = st.number_input("Precio de Venta (€)", min_value=0.0, step=0.01)
+                precio_compra = st.number_input("Precio de Compra ($)", min_value=0.0, step=0.01)
+                precio_venta = st.number_input("Precio de Venta ($)", min_value=0.0, step=0.01)
                 stock_inicial = st.number_input("Stock Inicial", min_value=0, step=1)
                 stock_minimo = st.number_input("Stock Mínimo de Alerta", min_value=0, value=5, step=1)
             
@@ -418,8 +418,8 @@ elif menu == "📦 Productos":
                             n_categoria_final = n_categoria
                     
                     with c2:
-                        n_precio_compra = st.number_input("Precio de Compra (€)", value=float(producto_data['precio_compra'] or 0), step=0.01)
-                        n_precio_venta = st.number_input("Precio de Venta (€)", value=float(producto_data['precio_venta'] or 0), step=0.01)
+                        n_precio_compra = st.number_input("Precio de Compra ($)", value=float(producto_data['precio_compra'] or 0), step=0.01)
+                        n_precio_venta = st.number_input("Precio de Venta ($)", value=float(producto_data['precio_venta'] or 0), step=0.01)
                         n_stock_actual = st.number_input("Stock Actual", value=int(producto_data['stock_actual'] or 0), step=1)
                         n_stock_minimo = st.number_input("Stock Mínimo", value=int(producto_data['stock_minimo'] or 5), step=1)
                     
@@ -535,7 +535,7 @@ elif menu == "📥 Compras (Entradas)":
                     precio_compra_actual = productos_df[productos_df['codigo'] == producto_sel.split(" - ")[0]]['precio_compra'].values[0]
                     
                     cantidad = st.number_input("Cantidad Comprada", min_value=1, step=1)
-                    costo_unitario = st.number_input("Costo Unitario (€)", min_value=0.0, value=float(precio_compra_actual or 0), step=0.01)
+                    costo_unitario = st.number_input("Costo Unitario ($)", min_value=0.0, value=float(precio_compra_actual or 0), step=0.01)
                 
                 with c2:
                     total_compra = cantidad * costo_unitario
@@ -643,11 +643,11 @@ elif menu == "💳 Ventas (Salidas)":
                     stock_disponible = productos_df[productos_df['codigo'] == producto_sel.split(" - ")[0]]['stock_actual'].values[0]
                     
                     cantidad = st.number_input("Cantidad a Vender", min_value=1, max_value=int(stock_disponible) if stock_disponible > 0 else 1, step=1)
-                    precio_unitario = st.number_input("Precio de Venta Unitario (€)", min_value=0.0, value=float(precio_venta_actual or 0), step=0.01)
+                    precio_unitario = st.number_input("Precio de Venta Unitario ($)", min_value=0.0, value=float(precio_venta_actual or 0), step=0.01)
                 
                 with c2:
                     total_venta = cantidad * precio_unitario
-                    st.metric("Total Venta", f"{total_venta:,.2f} €")
+                    st.metric("Total Venta", f"{total_venta:,.2f} $")
                     metodo_pago = st.selectbox("Método de Pago", ["Efectivo", "Tarjeta", "Transferencia", "Bizum"])
                     cliente = st.text_input("Cliente")
                     factura = st.text_input("Número de Factura")
@@ -660,7 +660,7 @@ elif menu == "💳 Ventas (Salidas)":
                     st.error(f"⚠️ Stock insuficiente. Disponible: {stock_disponible} unidades.")
                 else:
                     st.success(f"✅ Stock disponible: {stock_disponible} unidades. Venta de {cantidad} unidades.")
-                    st.info(f"💰 Subtotal: {total_venta:.2f}€")
+                    st.info(f"💰 Subtotal: {total_venta:.2f}$")
                 
                 if st.form_submit_button("✅ Registrar Venta", type="primary"):
                     if cantidad > stock_disponible:
@@ -782,8 +782,8 @@ elif menu == "📊 Balance General":
         
         col1.metric("📦 Total Productos", total_prod)
         col2.metric("🔢 Unidades Totales", int(total_unid))
-        col3.metric("💶 Inversión (Costo)", f"{valor_costo:,.2f} €")
-        col4.metric("📈 Ganancia Proyectada", f"{ganancia_esperada:,.2f} €")
+        col3.metric("💶 Inversión (Costo)", f"{valor_costo:,.2f} $")
+        col4.metric("📈 Ganancia Proyectada", f"{ganancia_esperada:,.2f} $")
         
         st.markdown("---")
         
