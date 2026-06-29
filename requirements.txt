@@ -2,3 +2,8 @@ streamlit
 pandas
 psycopg2-binary
 xlsxwriter
+streamlit
+pandas
+psycopg2-binary
+xlsxwriter
+fpdf
