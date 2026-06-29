@@ -203,8 +203,7 @@ def mostrar_productos(conn):
                         
                         for index, row in df_import.iterrows():
                             codigo = str(row.get('codigo', '')).strip().upper()
-                            if not codigo or codigo == 'NAN':
-                                continue
+                            if not codigo or codigo == 'NAN': continue
                                 
                             nombre = str(row.get('nombre', 'Sin nombre')).strip()
                             categoria = str(row.get('categoria', 'General')).strip()
@@ -236,7 +235,6 @@ def mostrar_productos(conn):
             except Exception as e:
                 conn.rollback()
                 st.error(f"⚠️ Error al procesar el archivo: {e}")
-                st.error("Verifica que las columnas del archivo coincidan exactamente con las indicadas.")
 
 def mostrar_control_producto(conn):
     st.subheader("📦 Control Individual por Producto (Kardex)")
@@ -257,7 +255,6 @@ def mostrar_control_producto(conn):
         c1.metric("Stock Actual", stock_act, delta="Bajo Mínimo" if stock_act <= stock_min else "Óptimo", delta_color="inverse" if stock_act <= stock_min else "normal")
         c2.metric("Stock Mínimo Permitido", stock_min)
         
-        # Consultar historial unificado (Compras + Ventas)
         query_kardex = """
             SELECT fecha, 'ENTRADA (Compra)' as tipo_movimiento, cantidad, costo_unitario as precio_unidad, 
                    total_compra as total, proveedor as responsable_o_cliente
@@ -275,7 +272,6 @@ def mostrar_control_producto(conn):
         
         st.markdown("### 📋 Historial de Movimientos")
         if not df_kardex.empty:
-            # Formato visual
             def color_movimiento(val):
                 if 'ENTRADA' in str(val): return 'color: green; font-weight: bold'
                 elif 'SALIDA' in str(val): return 'color: red; font-weight: bold'
@@ -293,6 +289,84 @@ def mostrar_control_producto(conn):
             st.info("No hay registros de entradas ni salidas para este producto.")
     else:
         st.warning("No hay productos registrados en el inventario.")
+
+# --- NUEVA FUNCIÓN DE GESTIÓN DE CATEGORÍAS ---
+def mostrar_categorias(conn):
+    st.subheader("🏷️ Configuración de Categorías")
+    tabs = st.tabs(["📋 Editar y Borrar", "➕ Crear Nueva"])
+    
+    df_cat = pd.read_sql("SELECT nombre FROM categorias ORDER BY nombre", conn)
+    
+    with tabs[0]:
+        st.write("Selecciona una categoría para cambiar su nombre o eliminarla permanentemente.")
+        if not df_cat.empty:
+            cat_sel = st.selectbox("Seleccionar Categoría", df_cat['nombre'])
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                with st.form("form_editar_cat"):
+                    st.write("✏️ **Cambiar Nombre**")
+                    nuevo_nombre = st.text_input("Nuevo nombre:", value=cat_sel)
+                    if st.form_submit_button("Actualizar", type="primary"):
+                        if nuevo_nombre.strip() and nuevo_nombre != cat_sel:
+                            try:
+                                cur = conn.cursor()
+                                # 1. Actualizamos el nombre en la tabla de categorías
+                                cur.execute("UPDATE categorias SET nombre = %s WHERE nombre = %s", (nuevo_nombre.strip(), cat_sel))
+                                # 2. Actualizamos automáticamente los productos asociados
+                                cur.execute("UPDATE productos SET categoria = %s WHERE categoria = %s", (nuevo_nombre.strip(), cat_sel))
+                                conn.commit()
+                                st.success(f"Categoría cambiada a '{nuevo_nombre.strip()}' con éxito.")
+                                time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                conn.rollback()
+                                st.error(f"Error: {e}")
+                        else:
+                            st.warning("Escribe un nombre distinto y que no esté vacío.")
+                            
+            with col2:
+                with st.form("form_borrar_cat"):
+                    st.write("🗑️ **Eliminar Categoría**")
+                    st.warning("Asegúrate de que ningún producto use esta categoría.")
+                    if st.form_submit_button("Borrar Permanentemente"):
+                        try:
+                            cur = conn.cursor()
+                            # Validar que no tenga productos activos
+                            cur.execute("SELECT COUNT(*) FROM productos WHERE categoria = %s", (cat_sel,))
+                            cant_productos = cur.fetchone()[0]
+                            
+                            if cant_productos > 0:
+                                st.error(f"❌ Imposible borrar: Hay {cant_productos} producto(s) usando esta categoría. Asígnales otra primero.")
+                            else:
+                                cur.execute("DELETE FROM categorias WHERE nombre = %s", (cat_sel,))
+                                conn.commit()
+                                st.success("Categoría borrada.")
+                                time.sleep(1)
+                                st.rerun()
+                        except Exception as e:
+                            conn.rollback()
+                            st.error(f"Error: {e}")
+        else:
+            st.info("No hay categorías creadas aún.")
+
+    with tabs[1]:
+        with st.form("form_nueva_cat"):
+            nueva_cat = st.text_input("Nombre de la Nueva Categoría")
+            if st.form_submit_button("Crear Categoría"):
+                if nueva_cat.strip():
+                    try:
+                        cur = conn.cursor()
+                        cur.execute("INSERT INTO categorias (nombre) VALUES (%s)", (nueva_cat.strip(),))
+                        conn.commit()
+                        st.success("✅ Categoría creada correctamente.")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        conn.rollback()
+                        st.error("Error: Posiblemente la categoría ya exista.")
+                else:
+                    st.error("El nombre no puede estar en blanco.")
 
 def mostrar_compras(conn):
     tabs = st.tabs(["➕ Registrar Compra", "📋 Historial de Compras"])
@@ -451,6 +525,7 @@ def main():
     st.sidebar.title("📦 Panel de Control")
     opciones = ["🏠 Inicio", "📦 Productos", "📋 Control por Producto", "📥 Compras (Entradas)", "💳 Ventas (Salidas)", "📊 Balance General"]
     
+    # Habilitar opciones de administrador
     if st.session_state.get('u_rol') == "admin": 
         opciones.extend(["🏷️ Categorías", "👥 Usuarios"])
         
@@ -462,6 +537,7 @@ def main():
 
     conn = conectar_db()
     
+    # Enrutador de menús
     if menu == "🏠 Inicio":
         mostrar_dashboard(conn)
     elif menu == "📦 Productos":
@@ -474,6 +550,8 @@ def main():
         mostrar_ventas(conn, st.session_state.get('u_rol'))
     elif menu == "📊 Balance General":
         mostrar_balance(conn)
+    elif menu == "🏷️ Categorías":
+        mostrar_categorias(conn)
         
     conn.close()
 
