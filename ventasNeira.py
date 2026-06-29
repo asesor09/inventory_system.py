@@ -9,10 +9,18 @@ import pandas as pd
 from datetime import datetime
 import hashlib
 import time
+import io
 
 # --- CONFIGURACIÓN GLOBAL ---
 st.set_page_config(page_title="Jacobo Store - Inventario", layout="wide", page_icon="📦")
 DB_URL = st.secrets["DB_URL"]
+
+# --- CONTROL ESTRICTO DE VENTANAS DUPLICADAS ---
+if 'sesion_activa' not in st.session_state:
+    st.session_state['sesion_activa'] = True
+elif not st.session_state.get('sesion_activa', False):
+    st.error("⚠️ Ya hay una ventana o sesión abierta. Cierre las ventanas repetidas para evitar conflictos.")
+    st.stop()
 
 # --- FUNCIONES DE BASE DE DATOS ---
 def conectar_db():
@@ -53,7 +61,7 @@ def inicializar_tablas():
     cur.execute('''CREATE TABLE IF NOT EXISTS configuracion (
         id SERIAL PRIMARY KEY, nombre_negocio TEXT DEFAULT 'Mi Tienda',
         direccion TEXT, telefono TEXT, email TEXT,
-        iva NUMERIC DEFAULT 0.0, moneda TEXT DEFAULT '€'
+        iva NUMERIC DEFAULT 0.0, moneda TEXT DEFAULT '$'
     )''')
     
     cur.execute('''CREATE TABLE IF NOT EXISTS categorias (
@@ -63,13 +71,20 @@ def inicializar_tablas():
     # Datos iniciales por defecto
     cur.execute("INSERT INTO usuarios (nombre, usuario, clave, rol) VALUES ('Administrador', 'admin', 'admin2026', 'admin') ON CONFLICT DO NOTHING")
     cur.execute("INSERT INTO usuarios (nombre, usuario, clave, rol) VALUES ('Vendedor', 'vendedor', 'vende2026', 'vendedor') ON CONFLICT DO NOTHING")
-    cur.execute("INSERT INTO configuracion (id, nombre_negocio, moneda) VALUES (1, 'Mi Tienda', '€') ON CONFLICT (id) DO NOTHING")
+    cur.execute("INSERT INTO configuracion (id, nombre_negocio, moneda) VALUES (1, 'Mi Tienda', '$') ON CONFLICT (id) DO NOTHING")
     
     categorias_base = ["Electrónica", "Ropa", "Alimentos", "Hogar", "Juguetes", "Herramientas", "Libros", "Deportes"]
     for cat in categorias_base:
         cur.execute("INSERT INTO categorias (nombre) VALUES (%s) ON CONFLICT DO NOTHING", (cat,))
         
     conn.close()
+
+# --- FUNCIÓN DE EXPORTACIÓN A EXCEL ---
+def exportar_excel(df, nombre_hoja='Reporte'):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name=nombre_hoja)
+    return output.getvalue()
 
 # --- VISTAS DE LA APLICACIÓN (MÓDULOS) ---
 
@@ -82,9 +97,9 @@ def mostrar_dashboard(conn):
     
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("📦 Total Productos", total_productos)
-    c2.metric("💰 Ventas Totales", f"{ventas_total:,.2f} €")
-    c3.metric("📈 Ventas Hoy", f"{ventas_hoy:,.2f} €")
-    c4.metric("⚠️ Stock Bajo", stock_bajo, delta="Revisar" if stock_bajo > 0 else "OK")
+    c2.metric("💰 Ventas Totales", f"$ {ventas_total:,.0f}")
+    c3.metric("📈 Ventas Hoy", f"$ {ventas_hoy:,.0f}")
+    c4.metric("⚠️ Stock Bajo", stock_bajo, delta="Revisar" if stock_bajo > 0 else "OK", delta_color="inverse")
     
     st.markdown("---")
     col1, col2 = st.columns(2)
@@ -118,8 +133,8 @@ def mostrar_productos(conn):
                 categoria = st.selectbox("Categoría", categorias_lista + ["Nueva..."])
                 cat_nueva = st.text_input("Nombre de nueva categoría") if categoria == "Nueva..." else None
             with c2:
-                p_compra = st.number_input("Precio Compra (€)", min_value=0.0, step=0.01)
-                p_venta = st.number_input("Precio Venta (€)", min_value=0.0, step=0.01)
+                p_compra = st.number_input("Precio Compra ($)", min_value=0.0)
+                p_venta = st.number_input("Precio Venta ($)", min_value=0.0)
                 s_inicial = st.number_input("Stock Inicial", min_value=0)
                 s_minimo = st.number_input("Stock Mínimo", value=5)
             
@@ -145,66 +160,103 @@ def mostrar_productos(conn):
         st.subheader("📋 Inventario Actual")
         df = pd.read_sql("SELECT codigo, nombre, categoria, precio_compra, precio_venta, stock_actual, stock_minimo FROM productos ORDER BY nombre", conn)
         st.dataframe(df, use_container_width=True)
+        if not df.empty:
+            st.download_button(
+                label="📥 Exportar Inventario a Excel",
+                data=exportar_excel(df, "Inventario"),
+                file_name=f"Inventario_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 def mostrar_compras(conn):
-    st.subheader("📥 Registrar Entrada de Mercancía")
-    df_p = pd.read_sql("SELECT id, codigo, nombre, precio_compra FROM productos", conn)
+    tabs = st.tabs(["➕ Registrar Compra", "📋 Historial de Compras"])
     
-    if not df_p.empty:
-        with st.form("form_compra"):
-            c1, c2 = st.columns(2)
-            with c1:
-                p_sel = st.selectbox("Producto", df_p['codigo'] + " - " + df_p['nombre'])
-                p_id = df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['id'].values[0]
-                cant = st.number_input("Cantidad", min_value=1)
-            with c2:
-                c_actual = float(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['precio_compra'].values[0] or 0)
-                costo = st.number_input("Costo Unitario (€)", value=c_actual, min_value=0.0, step=0.01)
+    with tabs[0]:
+        st.subheader("📥 Registrar Entrada de Mercancía")
+        df_p = pd.read_sql("SELECT id, codigo, nombre, precio_compra FROM productos", conn)
+        
+        if not df_p.empty:
+            with st.form("form_compra"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    p_sel = st.selectbox("Producto", df_p['codigo'] + " - " + df_p['nombre'])
+                    # Evitando el error de numpy.int64 con conversión explícita
+                    p_id = int(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['id'].iloc[0])
+                    cant = st.number_input("Cantidad", min_value=1)
+                with c2:
+                    c_actual = float(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['precio_compra'].iloc[0] or 0)
+                    costo = st.number_input("Costo Unitario ($)", value=c_actual, min_value=0.0)
+                
+                st.info(f"Total Compra: $ {cant * costo:,.0f}")
+                if st.form_submit_button("✅ Registrar Compra"):
+                    try:
+                        cur = conn.cursor()
+                        cur.execute("INSERT INTO compras (producto_id, cantidad, costo_unitario, total_compra) VALUES (%s, %s, %s, %s)", (p_id, cant, costo, cant*costo))
+                        cur.execute("UPDATE productos SET stock_actual = stock_actual + %s, precio_compra = %s WHERE id = %s", (cant, costo, p_id))
+                        conn.commit()
+                        st.success("Compra registrada correctamente.")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        conn.rollback()
+                        st.error(f"Error al registrar: {e}")
+        else:
+            st.warning("Debe registrar productos en el inventario primero.")
             
-            if st.form_submit_button("✅ Registrar Compra"):
-                cur = conn.cursor()
-                cur.execute("INSERT INTO compras (producto_id, cantidad, costo_unitario, total_compra) VALUES (%s, %s, %s, %s)", (p_id, cant, costo, cant*costo))
-                cur.execute("UPDATE productos SET stock_actual = stock_actual + %s, precio_compra = %s WHERE id = %s", (cant, costo, p_id))
-                conn.commit()
-                st.success("Compra registrada correctamente.")
-                time.sleep(1)
-                st.rerun()
-    else:
-        st.warning("Debe registrar productos en el inventario primero.")
+    with tabs[1]:
+        st.subheader("📋 Historial de Compras")
+        df_c = pd.read_sql("SELECT c.fecha, p.codigo, p.nombre, c.cantidad, c.costo_unitario, c.total_compra FROM compras c JOIN productos p ON c.producto_id = p.id ORDER BY c.fecha DESC", conn)
+        st.dataframe(df_c, use_container_width=True)
+        if not df_c.empty:
+            st.download_button("📥 Exportar Compras a Excel", data=exportar_excel(df_c, "Compras"), file_name="Compras.xlsx")
 
 def mostrar_ventas(conn, vendedor_actual):
-    st.subheader("💳 Registrar Salida de Mercancía")
-    df_p = pd.read_sql("SELECT id, codigo, nombre, precio_venta, stock_actual FROM productos WHERE stock_actual > 0", conn)
+    tabs = st.tabs(["➕ Registrar Venta", "📋 Historial de Ventas"])
     
-    if not df_p.empty:
-        with st.form("form_venta"):
-            c1, c2 = st.columns(2)
-            with c1:
-                p_sel = st.selectbox("Producto", df_p['codigo'] + " - " + df_p['nombre'] + " (Stock: " + df_p['stock_actual'].astype(str) + ")")
-                p_id = df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['id'].values[0]
-                stock = int(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['stock_actual'].values[0])
-                cant = st.number_input("Cantidad", min_value=1, max_value=stock)
-            with c2:
-                pv_actual = float(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['precio_venta'].values[0] or 0)
-                precio = st.number_input("Precio Venta (€)", value=pv_actual, min_value=0.0, step=0.01)
-                metodo = st.selectbox("Método de Pago", ["Efectivo", "Tarjeta", "Transferencia"])
+    with tabs[0]:
+        st.subheader("💳 Registrar Salida de Mercancía")
+        df_p = pd.read_sql("SELECT id, codigo, nombre, precio_venta, stock_actual FROM productos WHERE stock_actual > 0", conn)
+        
+        if not df_p.empty:
+            with st.form("form_venta"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    p_sel = st.selectbox("Producto", df_p['codigo'] + " - " + df_p['nombre'] + " (Stock: " + df_p['stock_actual'].astype(str) + ")")
+                    # Evitando el error de numpy.int64 con conversión explícita
+                    p_id = int(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['id'].iloc[0])
+                    stock = int(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['stock_actual'].iloc[0])
+                    cant = st.number_input("Cantidad", min_value=1, max_value=stock)
+                with c2:
+                    pv_actual = float(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['precio_venta'].iloc[0] or 0)
+                    precio = st.number_input("Precio Venta ($)", value=pv_actual, min_value=0.0)
+                    metodo = st.selectbox("Método de Pago", ["Efectivo", "Tarjeta", "Transferencia"])
+                
+                st.info(f"Total a cobrar: $ {cant * precio:,.0f}")
+                if st.form_submit_button("✅ Confirmar Venta"):
+                    try:
+                        cur = conn.cursor()
+                        cur.execute("INSERT INTO ventas (producto_id, cantidad, precio_unitario, total_venta, metodo_pago, vendedor) VALUES (%s, %s, %s, %s, %s, %s)", (p_id, cant, precio, cant*precio, metodo, vendedor_actual))
+                        cur.execute("UPDATE productos SET stock_actual = stock_actual - %s WHERE id = %s", (cant, p_id))
+                        conn.commit()
+                        st.success("Venta registrada correctamente.")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        conn.rollback()
+                        st.error(f"Error al registrar: {e}")
+        else:
+            st.warning("No hay productos con stock disponible.")
             
-            st.info(f"Total a cobrar: {cant * precio:,.2f} €")
-            if st.form_submit_button("✅ Confirmar Venta"):
-                cur = conn.cursor()
-                cur.execute("INSERT INTO ventas (producto_id, cantidad, precio_unitario, total_venta, metodo_pago, vendedor) VALUES (%s, %s, %s, %s, %s, %s)", (p_id, cant, precio, cant*precio, metodo, vendedor_actual))
-                cur.execute("UPDATE productos SET stock_actual = stock_actual - %s WHERE id = %s", (cant, p_id))
-                conn.commit()
-                st.success("Venta registrada correctamente.")
-                time.sleep(1)
-                st.rerun()
-    else:
-        st.warning("No hay productos con stock disponible.")
+    with tabs[1]:
+        st.subheader("📋 Historial de Ventas")
+        df_v = pd.read_sql("SELECT v.fecha, p.codigo, p.nombre, v.cantidad, v.precio_unitario, v.total_venta, v.metodo_pago, v.vendedor FROM ventas v JOIN productos p ON v.producto_id = p.id ORDER BY v.fecha DESC", conn)
+        st.dataframe(df_v, use_container_width=True)
+        if not df_v.empty:
+            st.download_button("📥 Exportar Ventas a Excel", data=exportar_excel(df_v, "Ventas"), file_name="Ventas.xlsx")
 
 def mostrar_balance(conn):
     st.subheader("📊 Balance General del Negocio")
     
-    # Esta sección estaba cortada en tu archivo original. Aquí está completada:
     inventario_df = pd.read_sql("""
         SELECT 
             COUNT(*) as total_productos,
@@ -218,18 +270,18 @@ def mostrar_balance(conn):
     if not inventario_df.empty:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Productos Únicos", inventario_df['total_productos'].iloc[0])
-        c2.metric("Unidades Totales", inventario_df['total_unidades'].iloc[0] or 0)
-        c3.metric("Inversión (Costo)", f"{inventario_df['valor_costo'].iloc[0] or 0:,.2f} €")
-        c4.metric("Valor de Venta Proyectado", f"{inventario_df['valor_venta'].iloc[0] or 0:,.2f} €")
+        c2.metric("Unidades Totales", int(inventario_df['total_unidades'].iloc[0] or 0))
+        c3.metric("Inversión (Costo)", f"$ {inventario_df['valor_costo'].iloc[0] or 0:,.0f}")
+        c4.metric("Valor de Venta Proyectado", f"$ {inventario_df['valor_venta'].iloc[0] or 0:,.0f}")
         
     st.markdown("### 💵 Flujo de Caja")
     ingresos = pd.read_sql("SELECT COALESCE(SUM(total_venta), 0) FROM ventas", conn).iloc[0,0]
     egresos = pd.read_sql("SELECT COALESCE(SUM(total_compra), 0) FROM compras", conn).iloc[0,0]
     
     col1, col2, col3 = st.columns(3)
-    col1.metric("Ingresos Históricos", f"{ingresos:,.2f} €")
-    col2.metric("Egresos Históricos", f"{egresos:,.2f} €")
-    col3.metric("Balance Neto", f"{ingresos - egresos:,.2f} €")
+    col1.metric("Ingresos Históricos", f"$ {ingresos:,.0f}")
+    col2.metric("Egresos Históricos", f"$ {egresos:,.0f}")
+    col3.metric("Balance Neto", f"$ {ingresos - egresos:,.0f}")
 
 # --- CONTROLADOR PRINCIPAL DE LA APLICACIÓN ---
 def main():
@@ -263,7 +315,6 @@ def main():
         st.info("👋 Bienvenido. Por favor ingresa tus credenciales en el panel izquierdo para comenzar.")
         st.stop()
 
-    # Configuración del Menú Lateral
     st.sidebar.title("📦 Panel de Control")
     opciones = ["🏠 Inicio", "📦 Productos", "📥 Compras (Entradas)", "💳 Ventas (Salidas)", "📊 Balance General"]
     
@@ -276,7 +327,6 @@ def main():
         st.session_state['logged_in'] = False
         st.rerun()
 
-    # Enrutador de Vistas
     conn = conectar_db()
     
     if menu == "🏠 Inicio":
