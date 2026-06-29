@@ -10,18 +10,6 @@ from datetime import datetime
 import hashlib
 import time
 
-# ==========================================
-# ventasNeira.py
-# Sistema de Inventario y Ventas - Neira Store
-# ==========================================
-
-import streamlit as st
-import psycopg2
-import pandas as pd
-from datetime import datetime
-import hashlib
-import time
-
 # --- CONFIGURACIÓN DE CONEXIÓN GLOBAL ---
 DB_URL = st.secrets["DB_URL"]
 
@@ -32,23 +20,6 @@ def inicializar_tablas():
     conn = conectar_db()
     conn.autocommit = True
     cur = conn.cursor()
-    
-    # 1. Tabla de Productos
-    cur.execute('''CREATE TABLE IF NOT EXISTS productos (
-        id SERIAL PRIMARY KEY, 
-        codigo TEXT UNIQUE NOT NULL, 
-        nombre TEXT NOT NULL, 
-        categoria TEXT, 
-        precio_compra NUMERIC DEFAULT 0.0, 
-        precio_venta NUMERIC DEFAULT 0.0, 
-        stock_actual INTEGER DEFAULT 0, 
-        stock_minimo INTEGER DEFAULT 5,
-        proveedor TEXT,
-        ubicacion TEXT,
-        fecha_registro DATE DEFAULT CURRENT_DATE
-    )''')
-    
-    # ... resto del código
     
     # 1. Tabla de Productos
     cur.execute('''CREATE TABLE IF NOT EXISTS productos (
@@ -170,6 +141,13 @@ def inicializar_tablas():
 
 # --- CONFIGURACIÓN DE LA INTERFAZ ---
 st.set_page_config(page_title="Neira Store - Inventario", layout="wide", page_icon="🏪")
+
+# --- CONTROL DE VENTANAS / SESIONES ---
+if 'sesion_activa' not in st.session_state:
+    st.session_state['sesion_activa'] = True
+elif not st.session_state.get('sesion_activa', False):
+    st.error("⚠️ Ya hay una ventana o sesión abierta. Cierre las ventanas repetidas para evitar conflictos.")
+    st.stop()
 
 # --- SISTEMA ANTI-ATASCOS ---
 if 'db_ready' not in st.session_state:
@@ -392,7 +370,7 @@ elif menu == "📦 Productos":
                         if categoria == "Nueva..." and categoria_nueva.strip():
                             try:
                                 cur.execute("INSERT INTO categorias (nombre) VALUES (%s) ON CONFLICT DO NOTHING", 
-                                           (categoria_nueva.strip(),))
+                                            (categoria_nueva.strip(),))
                             except:
                                 pass
                         
@@ -613,9 +591,9 @@ elif menu == "📥 Compras (Entradas)":
         if not compras_df.empty:
             col_f1, col_f2 = st.columns(2)
             with col_f1:
-                fecha_ini = st.date_input("Desde", compras_df['fecha'].min() if not compras_df.empty else datetime.now().date())
+                fecha_ini = st.date_input("Desde", compras_df['fecha'].min() if not compras_df.empty else datetime.now().date(), key="compras_desde")
             with col_f2:
-                fecha_fin = st.date_input("Hasta", compras_df['fecha'].max() if not compras_df.empty else datetime.now().date())
+                fecha_fin = st.date_input("Hasta", compras_df['fecha'].max() if not compras_df.empty else datetime.now().date(), key="compras_hasta")
             
             compras_df['fecha'] = pd.to_datetime(compras_df['fecha']).dt.date
             compras_filtradas = compras_df[
@@ -664,7 +642,7 @@ elif menu == "💳 Ventas (Salidas)":
                     precio_venta_actual = productos_df[productos_df['codigo'] == producto_sel.split(" - ")[0]]['precio_venta'].values[0]
                     stock_disponible = productos_df[productos_df['codigo'] == producto_sel.split(" - ")[0]]['stock_actual'].values[0]
                     
-                    cantidad = st.number_input("Cantidad a Vender", min_value=1, max_value=stock_disponible if stock_disponible > 0 else 0, step=1)
+                    cantidad = st.number_input("Cantidad a Vender", min_value=1, max_value=int(stock_disponible) if stock_disponible > 0 else 1, step=1)
                     precio_unitario = st.number_input("Precio de Venta Unitario (€)", min_value=0.0, value=float(precio_venta_actual or 0), step=0.01)
                 
                 with c2:
@@ -673,8 +651,8 @@ elif menu == "💳 Ventas (Salidas)":
                     metodo_pago = st.selectbox("Método de Pago", ["Efectivo", "Tarjeta", "Transferencia", "Bizum"])
                     cliente = st.text_input("Cliente")
                     factura = st.text_input("Número de Factura")
-                    fecha_venta = st.date_input("Fecha de Venta", datetime.now().date())
-                    vendedor = st.text_input("Vendedor", value=st.session_state.get('usuario_actual', ''))
+                    fecha_venta = st.date_input("Fecha de Venta", datetime.now().date(), key="ventas_fecha")
+                    vendedor = st.text_input("Vendedor", value=st.session_state.get('u_rol', ''))
                 
                 observaciones = st.text_area("Observaciones")
                 
@@ -729,9 +707,9 @@ elif menu == "💳 Ventas (Salidas)":
         if not ventas_df.empty:
             col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1:
-                fecha_ini = st.date_input("Desde", ventas_df['fecha'].min() if not ventas_df.empty else datetime.now().date())
+                fecha_ini = st.date_input("Desde", ventas_df['fecha'].min() if not ventas_df.empty else datetime.now().date(), key="hist_ventas_desde")
             with col_f2:
-                fecha_fin = st.date_input("Hasta", ventas_df['fecha'].max() if not ventas_df.empty else datetime.now().date())
+                fecha_fin = st.date_input("Hasta", ventas_df['fecha'].max() if not ventas_df.empty else datetime.now().date(), key="hist_ventas_hasta")
             with col_f3:
                 metodo_filtro = st.selectbox("Método de Pago", ["Todos"] + ventas_df['metodo_pago'].unique().tolist())
             
@@ -794,4 +772,36 @@ elif menu == "📊 Balance General":
     """, conn)
     
     if not inventario_df.empty:
-        col1,
+        col1, col2, col3, col4 = st.columns(4)
+        
+        total_prod = inventario_df['total_productos'].iloc[0] or 0
+        total_unid = inventario_df['total_unidades'].iloc[0] or 0
+        valor_costo = inventario_df['valor_inventario_costo'].iloc[0] or 0.0
+        valor_venta = inventario_df['valor_inventario_venta'].iloc[0] or 0.0
+        ganancia_esperada = valor_venta - valor_costo
+        
+        col1.metric("📦 Total Productos", total_prod)
+        col2.metric("🔢 Unidades Totales", int(total_unid))
+        col3.metric("💶 Inversión (Costo)", f"{valor_costo:,.2f} €")
+        col4.metric("📈 Ganancia Proyectada", f"{ganancia_esperada:,.2f} €")
+        
+        st.markdown("---")
+        
+        st.subheader("📋 Resumen de Transacciones")
+        
+        flujo_df = pd.read_sql("""
+            SELECT 
+                (SELECT COALESCE(SUM(total_venta), 0) FROM ventas) as total_ingresos,
+                (SELECT COALESCE(SUM(total_compra), 0) FROM compras) as total_egresos
+        """, conn)
+        
+        ingresos = flujo_df['total_ingresos'].iloc[0]
+        egresos = flujo_df['total_egresos'].iloc[0]
+        balance_actual = ingresos - egresos
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Ingresos (Ventas)", f"{ingresos:,.2f} €")
+        c2.metric("Egresos (Compras)", f"{egresos:,.2f} €")
+        c3.metric("Balance Neto", f"{balance_actual:,.2f} €", delta=float(balance_actual))
+
+    conn.close()
