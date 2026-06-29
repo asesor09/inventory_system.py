@@ -10,8 +10,20 @@ from datetime import datetime
 import hashlib
 import time
 
-# --- CONFIGURACIÓN DE CONEXIÓN GLOBAL (NEON) ---
-def conectar_db():
+# ==========================================
+# ventasNeira.py
+# Sistema de Inventario y Ventas - Neira Store
+# ==========================================
+
+import streamlit as st
+import psycopg2
+import pandas as pd
+from datetime import datetime
+import hashlib
+import time
+
+# --- CONFIGURACIÓN DE CONEXIÓN GLOBAL ---
+DB_URL = st.secrets["DB_URL"]
 
 def conectar_db():
     return psycopg2.connect(DB_URL)
@@ -20,6 +32,23 @@ def inicializar_tablas():
     conn = conectar_db()
     conn.autocommit = True
     cur = conn.cursor()
+    
+    # 1. Tabla de Productos
+    cur.execute('''CREATE TABLE IF NOT EXISTS productos (
+        id SERIAL PRIMARY KEY, 
+        codigo TEXT UNIQUE NOT NULL, 
+        nombre TEXT NOT NULL, 
+        categoria TEXT, 
+        precio_compra NUMERIC DEFAULT 0.0, 
+        precio_venta NUMERIC DEFAULT 0.0, 
+        stock_actual INTEGER DEFAULT 0, 
+        stock_minimo INTEGER DEFAULT 5,
+        proveedor TEXT,
+        ubicacion TEXT,
+        fecha_registro DATE DEFAULT CURRENT_DATE
+    )''')
+    
+    # ... resto del código
     
     # 1. Tabla de Productos
     cur.execute('''CREATE TABLE IF NOT EXISTS productos (
