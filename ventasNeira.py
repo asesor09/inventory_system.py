@@ -290,7 +290,6 @@ def mostrar_control_producto(conn):
     else:
         st.warning("No hay productos registrados en el inventario.")
 
-# --- NUEVA FUNCIÓN DE GESTIÓN DE CATEGORÍAS ---
 def mostrar_categorias(conn):
     st.subheader("🏷️ Configuración de Categorías")
     tabs = st.tabs(["📋 Editar y Borrar", "➕ Crear Nueva"])
@@ -311,9 +310,7 @@ def mostrar_categorias(conn):
                         if nuevo_nombre.strip() and nuevo_nombre != cat_sel:
                             try:
                                 cur = conn.cursor()
-                                # 1. Actualizamos el nombre en la tabla de categorías
                                 cur.execute("UPDATE categorias SET nombre = %s WHERE nombre = %s", (nuevo_nombre.strip(), cat_sel))
-                                # 2. Actualizamos automáticamente los productos asociados
                                 cur.execute("UPDATE productos SET categoria = %s WHERE categoria = %s", (nuevo_nombre.strip(), cat_sel))
                                 conn.commit()
                                 st.success(f"Categoría cambiada a '{nuevo_nombre.strip()}' con éxito.")
@@ -332,7 +329,6 @@ def mostrar_categorias(conn):
                     if st.form_submit_button("Borrar Permanentemente"):
                         try:
                             cur = conn.cursor()
-                            # Validar que no tenga productos activos
                             cur.execute("SELECT COUNT(*) FROM productos WHERE categoria = %s", (cat_sel,))
                             cant_productos = cur.fetchone()[0]
                             
@@ -473,7 +469,7 @@ def mostrar_balance(conn):
         FROM productos
     """, conn)
     
-    st.markdown("### 📦 Resumen de Inventario")
+    st.markdown("### 📦 Resumen de Inventario Físico")
     if not inventario_df.empty:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Productos Únicos", inventario_df['total_productos'].iloc[0])
@@ -481,14 +477,26 @@ def mostrar_balance(conn):
         c3.metric("Inversión (Costo)", f"$ {inventario_df['valor_costo'].iloc[0] or 0:,.0f}")
         c4.metric("Valor de Venta Proyectado", f"$ {inventario_df['valor_venta'].iloc[0] or 0:,.0f}")
         
-    st.markdown("### 💵 Flujo de Caja")
+    st.markdown("### 💵 Flujo de Caja y Utilidad Real")
+    
     ingresos = pd.read_sql("SELECT COALESCE(SUM(total_venta), 0) FROM ventas", conn).iloc[0,0]
     egresos = pd.read_sql("SELECT COALESCE(SUM(total_compra), 0) FROM compras", conn).iloc[0,0]
+    flujo_caja = ingresos - egresos
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Ingresos Históricos", f"$ {ingresos:,.0f}")
-    col2.metric("Egresos Históricos", f"$ {egresos:,.0f}")
-    col3.metric("Balance Neto", f"$ {ingresos - egresos:,.0f}")
+    query_utilidad = """
+        SELECT COALESCE(SUM(v.cantidad * (v.precio_unitario - p.precio_compra)), 0) as utilidad_real
+        FROM ventas v
+        JOIN productos p ON v.producto_id = p.id
+    """
+    utilidad_real = pd.read_sql(query_utilidad, conn).iloc[0,0]
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Ingresos Históricos", f"$ {ingresos:,.0f}")
+    col2.metric("Total Egresos Históricos", f"$ {egresos:,.0f}")
+    col3.metric("Flujo de Caja Libre", f"$ {flujo_caja:,.0f}")
+    col4.metric("Utilidad (Ganancia Neta)", f"$ {utilidad_real:,.0f}")
+    
+    st.info("💡 **Nota de cálculo:** El *Flujo de Caja* es el dinero líquido que te queda tras las compras. La *Utilidad* es la ganancia real obtenida exclusivamente de los productos que ya lograste vender (Precio Venta - Precio Costo).")
 
 # --- CONTROLADOR PRINCIPAL DE LA APLICACIÓN ---
 def main():
@@ -525,9 +533,8 @@ def main():
     st.sidebar.title("📦 Panel de Control")
     opciones = ["🏠 Inicio", "📦 Productos", "📋 Control por Producto", "📥 Compras (Entradas)", "💳 Ventas (Salidas)", "📊 Balance General"]
     
-    # Habilitar opciones de administrador
     if st.session_state.get('u_rol') == "admin": 
-        opciones.extend(["🏷️ Categorías", "👥 Usuarios"])
+        opciones.extend(["🏷️ Categorías"])
         
     menu = st.sidebar.radio("Navegación", opciones)
 
@@ -537,7 +544,6 @@ def main():
 
     conn = conectar_db()
     
-    # Enrutador de menús
     if menu == "🏠 Inicio":
         mostrar_dashboard(conn)
     elif menu == "📦 Productos":
