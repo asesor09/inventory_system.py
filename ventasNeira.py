@@ -782,8 +782,8 @@ elif menu == "📊 Balance General":
         
         col1.metric("📦 Total Productos", total_prod)
         col2.metric("🔢 Unidades Totales", int(total_unid))
-        col3.metric("💶 Inversión (Costo)", f"{valor_costo:,.2f} $")
-        col4.metric("📈 Ganancia Proyectada", f"{ganancia_esperada:,.2f} $")
+        col3.metric("💶 Inversión (Costo)", f" ${valor_costo:,.2f} ")
+        col4.metric("📈 Ganancia Proyectada", f"${ganancia_esperada:,.2f} ")
         
         st.markdown("---")
         
