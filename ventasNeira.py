@@ -1,15 +1,14 @@
 # ==========================================
-# inventory_system.py
-# Sistema de Inventario y Ventas - Neira Store
+# ventasNeira.py - Sistema Integrado Completo
 # ==========================================
 
 import streamlit as st
 import psycopg2
 import pandas as pd
 from datetime import datetime
-import hashlib
 import time
 import io
+from fpdf import FPDF
 
 # --- CONFIGURACIÓN GLOBAL ---
 st.set_page_config(page_title="Neira Store - Inventario", layout="wide", page_icon="📦")
@@ -78,7 +77,6 @@ def inicializar_tablas():
     for cat in categorias_base:
         cur.execute("INSERT INTO categorias (nombre) VALUES (%s) ON CONFLICT DO NOTHING", (cat,))
         
-    # Validar columnas añadidas para asegurar compatibilidad
     try:
         cur.execute("ALTER TABLE ventas ADD COLUMN cliente TEXT")
     except Exception:
@@ -94,12 +92,38 @@ def inicializar_tablas():
         
     conn.close()
 
-# --- FUNCIÓN DE EXPORTACIÓN A EXCEL ---
+# --- FUNCIONES DE EXPORTACIÓN ---
 def exportar_excel(df, nombre_hoja='Reporte'):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name=nombre_hoja)
     return output.getvalue()
+
+def exportar_pdf(df, titulo):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(200, 10, txt=titulo, ln=True, align='C')
+    pdf.ln(5)
+    
+    num_columnas = len(df.columns)
+    ancho_celda = 190 / num_columnas if num_columnas > 0 else 40
+    
+    # Encabezados
+    pdf.set_font("Arial", 'B', 8)
+    for col in df.columns:
+        pdf.cell(ancho_celda, 10, str(col)[:15], border=1)
+    pdf.ln()
+    
+    # Datos
+    pdf.set_font("Arial", size=8)
+    for i in range(len(df)):
+        for col in df.columns:
+            val = str(df.iloc[i][col])[:15]
+            pdf.cell(ancho_celda, 10, val, border=1)
+        pdf.ln()
+        
+    return pdf.output(dest='S').encode('latin-1')
 
 # --- VISTAS DE LA APLICACIÓN (MÓDULOS) ---
 
@@ -176,12 +200,21 @@ def mostrar_productos(conn):
         df = pd.read_sql("SELECT codigo, nombre, categoria, precio_compra, precio_venta, stock_actual, stock_minimo FROM productos ORDER BY nombre", conn)
         st.dataframe(df, use_container_width=True)
         if not df.empty:
-            st.download_button(
-                label="📥 Exportar Inventario a Excel",
-                data=exportar_excel(df, "Inventario"),
-                file_name=f"Inventario_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button(
+                    label="📥 Exportar Inventario Excel",
+                    data=exportar_excel(df, "Inventario"),
+                    file_name=f"Inventario_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            with col2:
+                st.download_button(
+                    label="📄 Exportar Inventario PDF",
+                    data=exportar_pdf(df, "Reporte de Inventario"),
+                    file_name="Inventario.pdf",
+                    mime="application/pdf"
+                )
 
 def mostrar_compras(conn):
     tabs = st.tabs(["➕ Registrar Compra", "📋 Historial de Compras"])
@@ -222,7 +255,11 @@ def mostrar_compras(conn):
         df_c = pd.read_sql("SELECT c.fecha, p.codigo, p.nombre, c.cantidad, c.costo_unitario, c.total_compra FROM compras c JOIN productos p ON c.producto_id = p.id ORDER BY c.fecha DESC", conn)
         st.dataframe(df_c, use_container_width=True)
         if not df_c.empty:
-            st.download_button("📥 Exportar Compras a Excel", data=exportar_excel(df_c, "Compras"), file_name="Compras.xlsx")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button("📥 Exportar Compras Excel", data=exportar_excel(df_c, "Compras"), file_name="Compras.xlsx")
+            with col2:
+                st.download_button("📄 Exportar Compras PDF", data=exportar_pdf(df_c, "Reporte de Compras"), file_name="Compras.pdf", mime="application/pdf")
 
 def mostrar_ventas(conn, vendedor_actual):
     tabs = st.tabs(["➕ Registrar Venta", "📋 Historial de Ventas"])
@@ -239,11 +276,10 @@ def mostrar_ventas(conn, vendedor_actual):
                     p_id = int(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['id'].iloc[0])
                     stock = int(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['stock_actual'].iloc[0])
                     cant = st.number_input("Cantidad", min_value=1, max_value=stock)
+                    cliente = st.text_input("Cliente *", placeholder="Nombre del cliente")
                 with c2:
                     pv_actual = float(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['precio_venta'].iloc[0] or 0)
                     precio = st.number_input("Precio Venta ($)", value=pv_actual, min_value=0.0)
-                    
-                    cliente = st.text_input("Cliente *", placeholder="Nombre del cliente")
                     tipo_venta = st.selectbox("Tipo de Venta", ["Contado", "Crédito"])
                     if tipo_venta == "Crédito":
                         fecha_vencimiento = st.date_input("Fecha de Vencimiento")
@@ -272,10 +308,14 @@ def mostrar_ventas(conn, vendedor_actual):
             
     with tabs[1]:
         st.subheader("📋 Historial de Ventas")
-        df_v = pd.read_sql("SELECT v.fecha, p.codigo, p.nombre, v.cantidad, v.precio_unitario, v.total_venta, v.cliente, v.tipo_venta, v.fecha_vencimiento, v.metodo_pago, v.vendedor FROM ventas v JOIN productos p ON v.producto_id = p.id ORDER BY v.fecha DESC", conn)
+        df_v = pd.read_sql("SELECT v.fecha, p.nombre, v.cantidad, v.precio_unitario, v.total_venta, v.cliente, v.tipo_venta, v.fecha_vencimiento FROM ventas v JOIN productos p ON v.producto_id = p.id ORDER BY v.fecha DESC", conn)
         st.dataframe(df_v, use_container_width=True)
         if not df_v.empty:
-            st.download_button("📥 Exportar Ventas a Excel", data=exportar_excel(df_v, "Ventas"), file_name="Ventas.xlsx")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button("📥 Exportar Ventas Excel", data=exportar_excel(df_v, "Ventas"), file_name="Ventas.xlsx")
+            with col2:
+                st.download_button("📄 Exportar Ventas PDF", data=exportar_pdf(df_v, "Reporte de Ventas"), file_name="Ventas.pdf", mime="application/pdf")
 
 def mostrar_balance(conn):
     st.subheader("📊 Balance General del Negocio")
