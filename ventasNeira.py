@@ -238,6 +238,62 @@ def mostrar_productos(conn):
                 st.error(f"⚠️ Error al procesar el archivo: {e}")
                 st.error("Verifica que las columnas del archivo coincidan exactamente con las indicadas.")
 
+def mostrar_control_producto(conn):
+    st.subheader("📦 Control Individual por Producto (Kardex)")
+    st.write("Consulta el historial completo de entradas y salidas de un artículo específico.")
+    
+    df_p = pd.read_sql("SELECT id, codigo, nombre, stock_actual, stock_minimo FROM productos ORDER BY nombre", conn)
+    
+    if not df_p.empty:
+        col_busqueda, col_vacia = st.columns([2, 1])
+        with col_busqueda:
+            p_sel = st.selectbox("🔍 Buscar Producto", df_p['codigo'] + " - " + df_p['nombre'])
+        
+        p_id = int(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['id'].iloc[0])
+        stock_act = int(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['stock_actual'].iloc[0])
+        stock_min = int(df_p[df_p['codigo'] == p_sel.split(" - ")[0]]['stock_minimo'].iloc[0])
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Stock Actual", stock_act, delta="Bajo Mínimo" if stock_act <= stock_min else "Óptimo", delta_color="inverse" if stock_act <= stock_min else "normal")
+        c2.metric("Stock Mínimo Permitido", stock_min)
+        
+        # Consultar historial unificado (Compras + Ventas)
+        query_kardex = """
+            SELECT fecha, 'ENTRADA (Compra)' as tipo_movimiento, cantidad, costo_unitario as precio_unidad, 
+                   total_compra as total, proveedor as responsable_o_cliente
+            FROM compras 
+            WHERE producto_id = %s
+            UNION ALL
+            SELECT fecha, 'SALIDA (Venta)' as tipo_movimiento, cantidad, precio_unitario as precio_unidad, 
+                   total_venta as total, cliente as responsable_o_cliente
+            FROM ventas 
+            WHERE producto_id = %s
+            ORDER BY fecha DESC
+        """
+        
+        df_kardex = pd.read_sql(query_kardex, conn, params=(p_id, p_id))
+        
+        st.markdown("### 📋 Historial de Movimientos")
+        if not df_kardex.empty:
+            # Formato visual
+            def color_movimiento(val):
+                if 'ENTRADA' in str(val): return 'color: green; font-weight: bold'
+                elif 'SALIDA' in str(val): return 'color: red; font-weight: bold'
+                return ''
+                
+            st.dataframe(df_kardex.style.map(color_movimiento, subset=['tipo_movimiento']), use_container_width=True)
+            
+            st.download_button(
+                label="📥 Descargar Kardex en Excel",
+                data=exportar_excel(df_kardex, "Kardex"),
+                file_name=f"Kardex_{p_sel.split(' - ')[0]}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.info("No hay registros de entradas ni salidas para este producto.")
+    else:
+        st.warning("No hay productos registrados en el inventario.")
+
 def mostrar_compras(conn):
     tabs = st.tabs(["➕ Registrar Compra", "📋 Historial de Compras"])
     
@@ -393,7 +449,7 @@ def main():
         st.stop()
 
     st.sidebar.title("📦 Panel de Control")
-    opciones = ["🏠 Inicio", "📦 Productos", "📥 Compras (Entradas)", "💳 Ventas (Salidas)", "📊 Balance General"]
+    opciones = ["🏠 Inicio", "📦 Productos", "📋 Control por Producto", "📥 Compras (Entradas)", "💳 Ventas (Salidas)", "📊 Balance General"]
     
     if st.session_state.get('u_rol') == "admin": 
         opciones.extend(["🏷️ Categorías", "👥 Usuarios"])
@@ -410,6 +466,8 @@ def main():
         mostrar_dashboard(conn)
     elif menu == "📦 Productos":
         mostrar_productos(conn)
+    elif menu == "📋 Control por Producto":
+        mostrar_control_producto(conn)
     elif menu == "📥 Compras (Entradas)":
         mostrar_compras(conn)
     elif menu == "💳 Ventas (Salidas)":
