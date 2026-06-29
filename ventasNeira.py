@@ -8,7 +8,6 @@ import pandas as pd
 from datetime import datetime
 import time
 import io
-from fpdf import FPDF
 
 # --- CONFIGURACIÓN GLOBAL ---
 st.set_page_config(page_title="Neira Store - Inventario", layout="wide", page_icon="📦")
@@ -92,38 +91,12 @@ def inicializar_tablas():
         
     conn.close()
 
-# --- FUNCIONES DE EXPORTACIÓN ---
+# --- FUNCIONES DE EXPORTACIÓN A EXCEL ---
 def exportar_excel(df, nombre_hoja='Reporte'):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name=nombre_hoja)
     return output.getvalue()
-
-def exportar_pdf(df, titulo):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(200, 10, txt=titulo, ln=True, align='C')
-    pdf.ln(5)
-    
-    num_columnas = len(df.columns)
-    ancho_celda = 190 / num_columnas if num_columnas > 0 else 40
-    
-    # Encabezados
-    pdf.set_font("Arial", 'B', 8)
-    for col in df.columns:
-        pdf.cell(ancho_celda, 10, str(col)[:15], border=1)
-    pdf.ln()
-    
-    # Datos
-    pdf.set_font("Arial", size=8)
-    for i in range(len(df)):
-        for col in df.columns:
-            val = str(df.iloc[i][col])[:15]
-            pdf.cell(ancho_celda, 10, val, border=1)
-        pdf.ln()
-        
-    return pdf.output(dest='S').encode('latin-1')
 
 # --- VISTAS DE LA APLICACIÓN (MÓDULOS) ---
 
@@ -159,7 +132,7 @@ def mostrar_dashboard(conn):
             st.info("No hay datos de ventas aún.")
 
 def mostrar_productos(conn):
-    tabs = st.tabs(["➕ Nuevo Producto", "🔍 Ver Inventario"])
+    tabs = st.tabs(["➕ Nuevo Producto", "🔍 Ver Inventario", "⬆️ Importar Masivamente"])
     categorias_lista = pd.read_sql("SELECT nombre FROM categorias ORDER BY nombre", conn)['nombre'].tolist()
     
     with tabs[0]:
@@ -200,21 +173,70 @@ def mostrar_productos(conn):
         df = pd.read_sql("SELECT codigo, nombre, categoria, precio_compra, precio_venta, stock_actual, stock_minimo FROM productos ORDER BY nombre", conn)
         st.dataframe(df, use_container_width=True)
         if not df.empty:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.download_button(
-                    label="📥 Exportar Inventario Excel",
-                    data=exportar_excel(df, "Inventario"),
-                    file_name=f"Inventario_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-            with col2:
-                st.download_button(
-                    label="📄 Exportar Inventario PDF",
-                    data=exportar_pdf(df, "Reporte de Inventario"),
-                    file_name="Inventario.pdf",
-                    mime="application/pdf"
-                )
+            st.download_button(
+                label="📥 Exportar Inventario a Excel",
+                data=exportar_excel(df, "Inventario"),
+                file_name=f"Inventario_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+    with tabs[2]:
+        st.subheader("⬆️ Importar Productos desde Excel")
+        st.info("💡 Tu archivo debe contener exactamente las siguientes columnas en la primera fila (en minúsculas): \n `codigo`, `nombre`, `categoria`, `precio_compra`, `precio_venta`, `stock_actual`, `stock_minimo`")
+        
+        archivo_subido = st.file_uploader("Selecciona tu archivo de inventario", type=['xlsx', 'xls', 'csv'])
+        
+        if archivo_subido is not None:
+            try:
+                if archivo_subido.name.endswith('.csv'):
+                    df_import = pd.read_csv(archivo_subido)
+                else:
+                    df_import = pd.read_excel(archivo_subido)
+                
+                st.write("👀 Vista previa de los datos encontrados:")
+                st.dataframe(df_import.head())
+                
+                if st.button("✅ Procesar e Importar", type="primary"):
+                    with st.spinner("Importando datos..."):
+                        cur = conn.cursor()
+                        productos_procesados = 0
+                        
+                        for index, row in df_import.iterrows():
+                            codigo = str(row.get('codigo', '')).strip().upper()
+                            if not codigo or codigo == 'NAN':
+                                continue
+                                
+                            nombre = str(row.get('nombre', 'Sin nombre')).strip()
+                            categoria = str(row.get('categoria', 'General')).strip()
+                            p_compra = float(row.get('precio_compra', 0.0) or 0.0)
+                            p_venta = float(row.get('precio_venta', 0.0) or 0.0)
+                            stock = int(row.get('stock_actual', 0) or 0)
+                            s_minimo = int(row.get('stock_minimo', 5) or 5)
+                            
+                            cur.execute("""
+                                INSERT INTO productos (codigo, nombre, categoria, precio_compra, precio_venta, stock_actual, stock_minimo)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (codigo) DO UPDATE SET
+                                    nombre = EXCLUDED.nombre,
+                                    categoria = EXCLUDED.categoria,
+                                    precio_compra = EXCLUDED.precio_compra,
+                                    precio_venta = EXCLUDED.precio_venta,
+                                    stock_actual = EXCLUDED.stock_actual,
+                                    stock_minimo = EXCLUDED.stock_minimo
+                            """, (codigo, nombre, categoria, p_compra, p_venta, stock, s_minimo))
+                            
+                            cur.execute("INSERT INTO categorias (nombre) VALUES (%s) ON CONFLICT DO NOTHING", (categoria,))
+                            productos_procesados += 1
+                            
+                        conn.commit()
+                        st.success(f"🎉 Importación exitosa. Se procesaron {productos_procesados} productos.")
+                        time.sleep(2)
+                        st.rerun()
+                        
+            except Exception as e:
+                conn.rollback()
+                st.error(f"⚠️ Error al procesar el archivo: {e}")
+                st.error("Verifica que las columnas del archivo coincidan exactamente con las indicadas.")
 
 def mostrar_compras(conn):
     tabs = st.tabs(["➕ Registrar Compra", "📋 Historial de Compras"])
@@ -255,11 +277,7 @@ def mostrar_compras(conn):
         df_c = pd.read_sql("SELECT c.fecha, p.codigo, p.nombre, c.cantidad, c.costo_unitario, c.total_compra FROM compras c JOIN productos p ON c.producto_id = p.id ORDER BY c.fecha DESC", conn)
         st.dataframe(df_c, use_container_width=True)
         if not df_c.empty:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.download_button("📥 Exportar Compras Excel", data=exportar_excel(df_c, "Compras"), file_name="Compras.xlsx")
-            with col2:
-                st.download_button("📄 Exportar Compras PDF", data=exportar_pdf(df_c, "Reporte de Compras"), file_name="Compras.pdf", mime="application/pdf")
+            st.download_button("📥 Exportar Compras a Excel", data=exportar_excel(df_c, "Compras"), file_name="Compras.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 def mostrar_ventas(conn, vendedor_actual):
     tabs = st.tabs(["➕ Registrar Venta", "📋 Historial de Ventas"])
@@ -311,11 +329,7 @@ def mostrar_ventas(conn, vendedor_actual):
         df_v = pd.read_sql("SELECT v.fecha, p.nombre, v.cantidad, v.precio_unitario, v.total_venta, v.cliente, v.tipo_venta, v.fecha_vencimiento FROM ventas v JOIN productos p ON v.producto_id = p.id ORDER BY v.fecha DESC", conn)
         st.dataframe(df_v, use_container_width=True)
         if not df_v.empty:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.download_button("📥 Exportar Ventas Excel", data=exportar_excel(df_v, "Ventas"), file_name="Ventas.xlsx")
-            with col2:
-                st.download_button("📄 Exportar Ventas PDF", data=exportar_pdf(df_v, "Reporte de Ventas"), file_name="Ventas.pdf", mime="application/pdf")
+            st.download_button("📥 Exportar Ventas a Excel", data=exportar_excel(df_v, "Ventas"), file_name="Ventas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 def mostrar_balance(conn):
     st.subheader("📊 Balance General del Negocio")
